@@ -1,0 +1,556 @@
+---
+title: "AirBnB & Zillow Data Challenge"
+author: "Avinash Vashishtha"
+date: "March 22, 2019"
+output: html_document
+---  
+
+
+
+```{r setup, include=FALSE, cache = FALSE}
+require("knitr")
+## setting working directory
+## Please change the location of Directory here
+opts_knit$set(root.dir = "C:/Univ of Cincinnati/Other/Capital One/R_Data")
+```
+
+##  {.tabset .tabset-fade}
+
+###  1.Introduction
+We are helping a real estate company that has a niche in purchasing properties 
+to rent out short-term as part of their business model specifically within New 
+York City. They want us to build a data product and provide conclusions to help them understand which zip codes would generate the most profit on short term rentals within New York City.
+
+#### 1.1.Data Available
+
+* **Cost data**: Zillow provides us an estimate of value for two-bedroom properties 
+* **Revenue data**: AirBnB is the medium through which the investor plans to lease out their investment property
+
+#### 1.2.Assumptions
+
+* The investor will pay for the property in cash (i.e. no mortgage/interest rate will
+need to be accounted for).
+* The time value of money discount rate is 0% (i.e. $1 today is worth the same
+100 years from now).
+* All properties and all square feet within each locale can be assumed to be
+homogeneous (i.e. a 1000 square foot property in a locale such as Bronx or
+Manhattan generates twice the revenue and costs twice as much as any other
+500 square foot property within that same locale.)
+
+
+
+
+### 2.Data Quality checks
+
+#### 2.1 Steps performed in Data Quality checks
+
+* **1.Data Loading**- Revenue and Cost file was loaded with the same name
+* **2.Missing value check**- Data is checked for missing values and result is displayed
+* **3.Relevant Column Names**- Column names of both Datasets were checked and relevant columns are filtered from the dataset.List of relevant columns includes-neighbourhood_group_cleansed,zipcode,bedrooms,square_feet,price,availability_30,review_scores_location,number_of_reviews,review_scores_rating,RegionID,2017-06(Latest cost of 2 bedroom apartment property)
+* **4.Missing values in columns**-Check count of missing values in relevant columns. Zipcode has 1.5% and bedrooms has 0.16% missing values.
+* **5.Data Cleaning**- Making zip to 5 digits. Dropping the dollar sign and changing the format to numeric format
+* **6.Merging the file**-Merging with the revenue file to get property cost of 2 bedroom apartments on the zip
+* **7.Filtering for NY Zips**-Filtering for NY zip codes that will be considered for the anaysis
+
+
+
+``` {r, echo = FALSE, include = TRUE}
+suppressWarnings(suppressMessages(library(dplyr)))
+suppressWarnings(suppressMessages(library(magrittr)))
+suppressWarnings(suppressMessages(library(tidyr))) 
+suppressWarnings(suppressMessages(library(ggplot2)))
+suppressWarnings(suppressMessages(library(readr)))
+suppressWarnings(suppressMessages(library(tidyverse)))
+suppressWarnings(suppressMessages(library(gridExtra)))
+#suppressWarnings(suppressMessages(library(stats))) 
+#suppressWarnings(suppressMessages(library(factoextra)))
+#suppressWarnings(suppressMessages(library(knitr)))
+#suppressWarnings(suppressMessages(library(kableExtra)))
+#suppressWarnings(suppressMessages(library(purrr)))
+
+```
+
+***Code for Loading Tables***
+
+``` {r, echo = TRUE, include = TRUE, warning = FALSE}
+
+datasets<-c("listings.csv.gz","Zip_Zhvi_2bedroom.csv")
+for (i in seq_along(datasets))
+{ 
+  
+  file_path=paste0(datasets[i])
+  if(file.exists(file_path))
+  {
+    df<-read_csv(file_path)
+    assign(datasets[i],df)
+  } else
+    print("No such file exits")
+}
+
+```
+***Missing Values -*** 
+``` {r, echo = TRUE, include = TRUE, warning = FALSE}
+for (i in seq_along(datasets))
+{ 
+missing_values<-any(is.na(get(datasets[i])))
+if (missing_values)
+{
+  
+  print(paste(datasets[i],"has Missing values"))
+} else
+  print(paste(datasets[i],"has no Missing values"))
+}
+
+```
+***Column Names *** 
+``` {r, echo = FALSE, include = FALSE}
+colnames(listings.csv.gz)
+colnames(Zip_Zhvi_2bedroom.csv)
+```
+
+***Percentage of missing values***
+Zip,bedrooms,availability_30,number_of_reviews,price
+
+``` {r, echo = FALSE, include = TRUE}
+sum(is.na(listings.csv.gz$zipcode))/nrow(listings.csv.gz)
+sum(is.na(listings.csv.gz$bedrooms))/nrow(listings.csv.gz)
+sum(is.na(listings.csv.gz$availability_30))/nrow(listings.csv.gz)
+sum(is.na(listings.csv.gz$number_of_reviews))/nrow(listings.csv.gz)
+sum(is.na(listings.csv.gz$price))/nrow(listings.csv.gz)
+sum(is.na(Zip_Zhvi_2bedroom.csv$'2017-06'))/nrow(Zip_Zhvi_2bedroom.csv)
+```
+
+***Cleaning Data***
+
+* Changing zip to 5 digit format
+* Extracting the integer from character format for price column
+* you can check number of rows in listings(raw file) and after filtering for NY city.Reduced from ~41k to ~9k when filtered for NY city
+
+``` {r, echo = FALSE, include = TRUE}
+listings.csv.gz$zipcode_mod<-ifelse(nchar(listings.csv.gz$zipcode)==5,listings.csv.gz$zipcode,substr(listings.csv.gz$zipcode,1,5))
+listings.csv.gz$price_int <- as.numeric(gsub('[$,]', '', listings.csv.gz$price))
+
+dim(listings.csv.gz)
+
+listings_nyc<-filter(Zip_Zhvi_2bedroom.csv,City=="New York")%>%
+  rename(zipcode_mod=RegionName)%>%
+  select(c(zipcode_mod,City,State,Metro,CountyName,'2017-06'))%>%
+  inner_join(listings.csv.gz,by='zipcode_mod')
+
+dim(listings_nyc)
+
+```
+
+### 3.Data Analysis
+
+***Inputs***
+
+Following inputs were used which can be changed to see results for different values-
+
+***cutoff_review***-Only properties with reviews greater than cutoff_review were considered in the analysis
+
+***price_min_cutoff/price_max_cutoff***-These values were used in deciding which properties should be included based on price
+
+``` {r, echo = TRUE, include = TRUE}
+cutoff_review<-4
+price_min_cutoff<-0.05
+price_max_cutoff<-0.95
+```
+
+``` {r, echo = FALSE, include = FALSE}
+colnames(listings_nyc)
+listings_nyc_cleaned<-listings_nyc[,c(1,3,6,45:54,58,60,62,63,66,67,70,86,83,91,78,102)]
+colnames(listings_nyc_cleaned)
+
+```
+#### 3.1 Methodology
+
+* ***Step 1-EDA (3.2)***- Checking count across Zips and Neighbourhoods
+* ***Step 2-Cost Factor  (3.3)***- Based on average square feet area across bedroom count, Cost factor was calculated. This was used later to calculate property cost
+* ***Step 3-Calculating Occupancy Rate  (3.4)*** -Calculating Occupancy rate across review_score_location and same was used later to calculate occupancy for each property. Occupancy rate was calculated using available_30(Indicates the number of days the property is available for rent within 30 days)
+* ***Step 4-Outlier Removal on Pricing  (3.5)*** -Price/day for properties across neighbourhood were checked to identify outliers and only properties which lie in the middle 90%(5%-95%) were considered in the analysis. This was done to ensure that outliers(Properties with very high price/day) don't influence our results
+* ***Step 5-Creation Of Metrics  (3.6)***-Annual Revenue, Property cost and Breakeven Years were calculated for properties
+* ***Step 6-Analyzing results across zips and neighbourhood  (3.7)*** - Results were analysed after rolling up numbers at Zip and neighbourhood level.Top performing zips were pulled based on breakeven period 
+
+
+#### 3.2 Exploratory data analysis
+
+***Initially, we just checked the count of properties across buroughs and zips***
+``` {r, echo = FALSE, include = TRUE}
+
+listings_nyc_grp<-listings_nyc_cleaned%>%
+  group_by(neighbourhood_group_cleansed)%>%
+  summarise(Property_counts=n())
+
+#Count of properties in different borough
+ggplot(listings_nyc_grp,aes(reorder(neighbourhood_group_cleansed,Property_counts),fill=neighbourhood_group_cleansed))+
+  geom_bar(aes(weight=Property_counts))+
+  coord_flip()+
+  theme(legend.position = "bottom",legend.title = element_blank())+
+  labs(title = "Properties count across different Borough", y = "Count Properties", x = "Neighbourhood")
+  
+
+#Chart 2-count of properties in different zips
+ggplot(listings_nyc_cleaned,aes(x=zipcode_mod,fill=neighbourhood_group_cleansed))+
+  geom_bar()+
+  coord_flip()+
+  theme(legend.position = "none",legend.title = element_blank())+
+  labs(title = "Properties count across different Zips", y = "Count Properties", x = "Zips")
+  
+```
+
+#### 3.3 Calculating cost factor
+
+***Analysis of Bedroom count***
+
+* Majority of the properties are 1 bedroom apartments
+* Bedrooms count was checked as this would be an important factor in deciding the cost of the apartment
+* We only have cost of 2 bedroom apartment in a particular zip 
+* This factor will be used in deciding the property cost based on the bedroom count
+* 0 bedrooms based on average_sq_feet value were assumed to be studio apartments similar to 1 bedroom apartment
+
+``` {r, echo = FALSE, include = TRUE, warning = FALSE}
+ggplot(listings_nyc_cleaned,aes(x=bedrooms))+
+  geom_bar()
+
+cost_factor<-listings_nyc_cleaned%>%
+             group_by(bedrooms)%>%
+             summarise(mean_sq_feet=mean(square_feet,na.rm = TRUE),mean_factor_2bedroom=mean(square_feet,na.rm = TRUE)/924)
+```
+
+***Table 1 : Table showing cost factor that will be used in the analysis*** 
+
+``` {r, echo = FALSE, include = TRUE, warning = FALSE}
+head(cost_factor,10)
+
+```
+#### 3.4 Calculating Occupancy Rate
+***Analysis of Reviews*** 
+
+* Next, we looked at reviews count as properties with fewer reviews suggests that either those properties are new or there is not enough data to make an accurate judgement based on review score
+* We will use review score to decide on occupancy rate. Properties with lower location review score are likely to have lower occupancy rate
+* We are looking at ~50% of the property **if we take a default cutoff value(This can be changed above) of 5 reviews in our anaysis**. So, only properties where we have 5 or more reviews will be considered for the analysis
+
+``` {r, echo = FALSE, include = TRUE}
+ggplot(listings_nyc_cleaned,aes(x=number_of_reviews))+
+  geom_bar()
+
+count_review_score<-listings_nyc_cleaned%>%
+  group_by(number_of_reviews)%>%
+  summarise(count=n())
+```
+
+We are only considering 50% of the properties with 5 or more than 5 review. This value is dynamic and can be changed in the anaysis (Input at the top Input 1)
+``` {r, echo = FALSE, include = TRUE}
+sum(ifelse(count_review_score$number_of_reviews>cutoff_review,count_review_score$count,0))/sum(count_review_score$count)
+
+```
+
+***Using review score location to define Occupancy rate ***
+
+* After filtering for properties with 5 or more than 5 reviews, we checked their review score rating and review scores location to understand the distribution
+* Since, we are more interested in location, we calculated occupancy rate based on Location review score and same will be used to caluculate revenue
+* We can see that occupancy of the property goes down as review score location rating decreases
+* Manhattan has the highest location review rating followed by brooklyn, staten Island and Queens
+
+``` {r, echo = FALSE, include = TRUE, warning = FALSE}
+
+listings_nyc_ge5_reviews<-listings_nyc_cleaned[listings_nyc_cleaned$number_of_reviews>cutoff_review,]
+
+review_score<-listings_nyc_ge5_reviews%>%
+  group_by(review_scores_location)%>%
+  summarise(property_count=n())
+
+ggplot(review_score,aes(x=review_scores_location))+
+  geom_bar(aes(weight=property_count))
+
+location_score_neigh_grp<-listings_nyc_ge5_reviews%>%
+  group_by(neighbourhood_group_cleansed)%>%
+  summarise(count=n(),mean_review_score=mean(review_scores_location,na.rm=TRUE))
+
+
+ggplot(location_score_neigh_grp,aes(fill=neighbourhood_group_cleansed,x=reorder(neighbourhood_group_cleansed,mean_review_score)))+
+  geom_bar(aes(weight=mean_review_score))+
+  coord_flip()+
+  theme(legend.position = "none",legend.title = element_blank())+
+  labs(title = "Review Score location across borough", y = "Avg Review Score location", x = "Neighbourhood")
+```
+
+***This graph shows that higher review scores lcation result in higher occupancy rate***
+``` {r, echo = FALSE, include = TRUE, warning = FALSE}
+#This table will be used for the mean_occupancy
+review_score_loc<-listings_nyc_ge5_reviews%>%
+  group_by(review_scores_location)%>%
+  summarise(count_reviews=n(),mean_occupancy=1-mean(availability_30)/30)
+
+ggplot(review_score_loc,aes(x=review_scores_location))+
+  geom_bar(aes(weight=mean_occupancy))
+
+```
+
+***Table 2 : This table shows the occupancy rate across review_scores_location values***
+
+
+``` {r, echo = FALSE, include = TRUE, warning = FALSE}
+head(review_score_loc,10)
+
+```
+***This table will be used to calculate occupancy rate for properties based on their location review score***
+
+
+#### 3.5 Outlier Removal on Pricing
+
+***Analysing Price to look for outliers***
+
+* We checked price across neighbourhood groups and identified several outliers as shown in the graph below
+* We used default values (0.05, 0.95) to remove outliers from both sides to get more robust results ***This values can be changed at the top-Input values*** 
+* After removing outliers boxplot was created again
+* Analysis was performed on these values only
+
+``` {r, echo = FALSE, include = TRUE}
+
+ggplot(data = listings_nyc_ge5_reviews, aes(x=neighbourhood_group_cleansed,y=price_int)) + 
+  geom_point(alpha=0.5,col="black")+
+  geom_boxplot(outlier.size=4, outlier.colour='blue', alpha=0.1)+
+  ggtitle("Price per day")
+
+
+#quantile(filter(listings_nyc_ge5_reviews,neighbourhood_group_cleansed=='Manhattan')$price_int,probs = c(price_min_cutoff, price_max_cutoff),na.rm = TRUE)
+#quantile(filter(listings_nyc_ge5_reviews,neighbourhood_group_cleansed=='Brooklyn')$price_int,probs = c(price_min_cutoff, price_max_cutoff),na.rm = TRUE)
+#quantile(filter(listings_nyc_ge5_reviews,neighbourhood_group_cleansed=='Queens')$price_int,probs = c(price_min_cutoff, price_max_cutoff),na.rm = TRUE)
+#quantile(filter(listings_nyc_ge5_reviews,neighbourhood_group_cleansed=='Staten Island')$price_int,probs = c(price_min_cutoff, price_max_cutoff),na.rm = TRUE)
+
+
+
+listings_nyc_ge5_pr_out<-listings_nyc_ge5_reviews%>%
+  filter((neighbourhood_group_cleansed=='Manhattan'&price_int<450&price_int>72)|(neighbourhood_group_cleansed=='Brooklyn'&price_int<350&price_int>64)|(neighbourhood_group_cleansed=='Queens'&price_int<130&price_int>40)|(neighbourhood_group_cleansed=='Staten Island'&price_int<197&price_int>32))
+
+#dim(listings_nyc_ge5_pr_out)
+
+#listings_nyc_ge5_pr_out%>%
+#  group_by(neighbourhood_group_cleansed)%>%
+#  summarise(mean_price=min(price_int),mean1_price=max(price_int))
+
+
+```
+
+***After outlier removal the box plot looks like this***
+``` {r, echo = FALSE, include = TRUE}
+ggplot(data = listings_nyc_ge5_pr_out, aes(x=neighbourhood_group_cleansed,y=price_int)) + 
+  geom_point(alpha=0.5,col="black")+
+  geom_boxplot()+
+  ggtitle("Price per day")
+
+```
+
+#### 3.6 Creation Of Metrics
+
+***Defining Revenue, property cost and years to breakeven using the dataset created above***
+
+* **Annual Revenue** is defined as the **price per day X 365 X Occupancy** (Occupancy was based on the review score location as discussed earlier )
+
+* **Property cost** is based on **Latest cost of 2 bedroom apartment X Factor calculated earlier based on bedroom count**
+
+* **years to breakeven = Property cost/Annual Revenue**
+<br>
+
+``` {r, echo = FALSE, include = TRUE}
+
+listings_nyc_filtered<-listings_nyc_ge5_pr_out%>%
+                       inner_join(review_score_loc,by="review_scores_location")%>%
+                       inner_join(cost_factor,by="bedrooms")
+
+listings_nyc_filtered$revenue<-listings_nyc_filtered$price_int*365*listings_nyc_filtered$mean_occupancy
+
+listings_nyc_filtered$property_cost<-listings_nyc_filtered$`2017-06`*listings_nyc_filtered$mean_factor_2bedroom
+
+listings_nyc_filtered$profit_dollars<-(listings_nyc_filtered$price_int*365*listings_nyc_filtered$mean_occupancy)/(listings_nyc_filtered$`2017-06`*listings_nyc_filtered$mean_factor_2bedroom)
+
+#listings_nyc_zip$breakeven<-1/listings_nyc_zip$profit_dollars_mean
+
+
+```
+
+``` {r, echo = FALSE, include = TRUE}
+# Zip neighbourhood group mapping 
+zip_borough_mapping<-listings_nyc_filtered%>%
+  group_by(zipcode_mod,neighbourhood_group_cleansed)%>%
+  summarise(count_zip_property=n())%>%
+  arrange(desc(count_zip_property))
+zip_borough<-zip_borough_mapping[!duplicated(zip_borough_mapping$zipcode_mod),c(1,2)]  
+
+```
+
+#### 3.7 Analyzing results across zips and neighbourhood
+***Bar graph showing avg price and property cost across Boroughs(Neighbourhood Group)***
+***Insights from the charts creted at neighbourhood level***
+
+* **Price per day** - Average price per day is highest for manhattan(~$190), followed by brooklyn(~$170), Staten Island(~$80) and Queens(~$60)
+
+* **Property cost per day** - Property cost also follows the same order-Manhattan, brooklyn,Staten Island and Queens
+
+* **Years to breakeven** - Breakeven Years is minimum for staten Island followed by Queens, Brooklyn and manhatten. ***Deep dive at zip level is needed to understand which zips are most profittable***
+
+``` {r, echo = FALSE, include = TRUE}
+#Mean revenue earned across neighbourhood_group_cleansed
+listings_nyc_grp<-listings_nyc_filtered%>%
+  group_by(neighbourhood_group_cleansed)%>%
+  summarise(price_day_dollars_mean=mean(price_int),cost_dollars_mean=mean(property_cost),revenue_annual=mean(revenue))%>%
+  mutate(breakeven_years=cost_dollars_mean/revenue_annual)
+
+
+#Price per day across Borough
+ggplot(listings_nyc_grp, aes(fill=neighbourhood_group_cleansed,reorder(neighbourhood_group_cleansed,price_day_dollars_mean)))+
+  geom_bar(aes(weight=price_day_dollars_mean))+
+  coord_flip()+
+  labs(title = "Average price/day across different Borough", x = "Borough", y = "Price Per Day")+
+  theme(legend.position = "bottom",legend.title = element_blank())
+
+
+#Property cost across Borough
+ggplot(listings_nyc_grp, aes(fill=neighbourhood_group_cleansed,reorder(neighbourhood_group_cleansed,cost_dollars_mean)))+
+  geom_bar(aes(weight=cost_dollars_mean))+
+  coord_flip()+
+  labs(title = "Average cost across different Borough", x = "Borough", y = "Property Cost")+
+  theme(legend.position = "none")
+
+#grid.arrange(g1, g2, ncol = 2)
+
+#Years to breakeven across boroughs
+ggplot(listings_nyc_grp, aes(fill=neighbourhood_group_cleansed,reorder(neighbourhood_group_cleansed,desc(breakeven_years))))+
+  geom_bar(aes(weight=breakeven_years))+
+  coord_flip()+
+  labs(title = "Breakeven years across different Borough", x = "Borough", y = "Years to breakeven")+
+  theme(legend.position = "none")
+
+```
+
+***Count of properties across Zips***
+
+In case same zip was associated with multiple neighbourhood, zip was mapped to neighbourhood with maximum mappings
+
+
+
+``` {r, echo = FALSE, include = TRUE}
+
+#Mean revenue earned across neighbourhood_group_cleansed
+listings_nyc_zip<-listings_nyc_filtered%>%
+  group_by(zipcode_mod)%>%
+  summarise(price_day_dollars_mean=mean(price_int),cost_dollars_mean=mean(property_cost),count_property=n(),revenue_annual=mean(revenue))%>%
+  inner_join(zip_borough,by="zipcode_mod")%>%
+  mutate(breakeven_years=cost_dollars_mean/revenue_annual)
+
+
+#count of properties in different zips
+ggplot(listings_nyc_zip,aes(reorder(zipcode_mod,count_property),fill=neighbourhood_group_cleansed))+
+  geom_bar(aes(weight=count_property))+
+  coord_flip()+
+  labs(title = "Properties count across different Borough", y = "Zips", x = "Properties count")+
+  theme(legend.position = "bottom",legend.title = element_blank())
+```
+
+***Insights from the charts creted at neighbourhood level***
+
+* **Price per day** - Average price per day is highest for manhattan zips(10014,10011,10023), followed by brooklyn zips(11217)
+
+* **Property cost per day** - Property cost also follows the same order-Manhattan, brooklyn,Staten Island and Queens
+
+
+
+``` {r, echo = FALSE, include = TRUE}
+#Price per day across Zip
+ggplot(listings_nyc_zip, aes(fill=neighbourhood_group_cleansed,reorder(zipcode_mod,price_day_dollars_mean)))+
+  geom_bar(aes(weight=price_day_dollars_mean))+
+  coord_flip()+
+  labs(title = "Average price/day across different Zip", x = "Zip", y = "Price Per Day")+
+  theme(legend.position = "bottom",legend.title = element_blank())
+
+
+#Property cost across Zip
+ggplot(listings_nyc_zip, aes(fill=neighbourhood_group_cleansed,reorder(zipcode_mod,cost_dollars_mean)))+
+  geom_bar(aes(weight=cost_dollars_mean))+
+  coord_flip()+
+  labs(title = "Average cost across different zip", x = "Zip code", y = "Property Cost")+
+  theme(legend.position = "bottom",legend.title = element_blank())
+```
+
+* **Years to breakeven** - Breakeven Years is minimum for staten Island followed by Queens, Brooklyn and manhatten. Graph suggests that it would be best to invest in following top 10 zips-
+
+1. 10305(SI)
+2. 10306(SI)
+3. 10314(SI)
+4. 10312(SI)
+5. 10303(SI)
+6. 10308(SI)
+7. 11234(B)
+8. 11434(Q)
+9. 10304(SI)
+10. 11215(B)
+
+***Graph showing Breakeven time period across Zips in order from lowest to Highest***
+
+Zips present in Staten Island gives the best ROI
+
+``` {r, echo = FALSE, include = TRUE}
+#Years to breakeven across boroughs
+ggplot(listings_nyc_zip, aes(fill=neighbourhood_group_cleansed,reorder(zipcode_mod,desc(breakeven_years))))+
+  geom_bar(aes(weight=breakeven_years))+
+  coord_flip()+
+  labs(title = "Breakeven years across zips", x = "Zip code", y = "Breakeven years")+
+  theme(legend.position = "bottom",legend.title = element_blank())
+
+```
+
+### 4.Recommendations And Next Steps
+
+#### 4.1.Observations
+
+* Although, most of the properties are in Manhattan as it receives the highest number of guests . Our Analysis suggests that the breakeven is also longest for Manhattan due to high property cost
+
+* Manhattan presents tough competition as there are many competitors and it has high property cost. Overall, it has long breakeven point and doesn't present a good opportunity in terms of ROI
+
+* Staten Island has considerable lower property cost but it also gets fewer guests. ***Also, travellers and tourist who are visiting NY for business and leisure, it is much better for them to stay in manhattan which is closer to offices and other tourist attractions***
+
+* ***But going just by numbers it seems it is much safer to invest in a property at Staten Island as it offers shorter Breakeven point and is less risky compared to other locations***
+
+* In case the company wants to diversify, they should pick the top zips from different neighbourhoods to minimize risk
+
+#### 4.2.Recommendations
+
+* This is the list of top 10 performing zips that came in the analysis-
+1. 10305(SI)
+2. 10306(SI)
+3. 10314(SI)
+4. 10312(SI)
+5. 10303(SI)
+6. 10308(SI)
+7. 11234(B)
+8. 11434(Q)
+9. 10304(SI)
+10. 11215(B)
+
+* ***Our recommendation would be to diversify and buy properties in top performing zips of different neighbourhoods with prime focus on staten Island***
+
+* For instance, If we need to recommend 8 zips then these are the zips we would recommend-
+1. 10305(SI)
+2. 10306(SI)
+3. 10314(SI)
+4. 10312(SI)
+5. 11234(B)
+6. 11434(Q)
+7. 11215(B)
+8. 10036(M)
+
+* Profitability should be evaluated in a year to understand whether these properties are providing expected returns 
+
+#### 4.3.Next Steps
+
+* ***Property cost*** - Property cost used for this analysis was from Jun'17. Latest property cost should be used if it is available. We can also use forecasting techniques like ***ARIMA*** to predict latest property cost from past trend. We can also take the actual cost of properties which would give more accurate results
+
+* ***Factors impacting Occupancy***- In the present analysis, although we have used occupancy rate based on review score location, there are other factors which impact occupancy rate. We should also normalize our results for other factors like cleanliness, staff behavior etc which definitely impacts Occupancy rate using regression model.We can also  use Availability_30 at property level to get more accurate results
+
+* ***Discount/Interest Rate***- In this case, we have taken 0% discount rate as our assumption but that assumption is not practical. ***Some reasonable percentage rate can be taken to calculate NPV value and make a more accurate prediction***
+
+``` {r, echo = FALSE, include = TRUE}
+
+```
